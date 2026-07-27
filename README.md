@@ -1,3 +1,4 @@
+v1.0.0
 # jachacks-fintech
 
 **What does sending money home actually cost?**
