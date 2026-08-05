@@ -111,12 +111,83 @@ works end to end with no API key.
 
 ---
 
-## Running it
+## Running it locally
+
+You need [Jac](https://www.jaseci.org/) on your PATH. Built and tested against
+`jac 0.34.5`, Python 3.14, Node 26.
 
 ```bash
-jac start --dev main.jac      # app + API with hot reload
-jac test pricing_tests.jac    # 8 pricing tests
-jac check .                   # type-check everything
+git clone git@github.com:sidbar258/jachacks-fintech.git
+cd jachacks-fintech
+
+jac install                   # Python + npm dependencies, from jac.toml
+jac start --dev main.jac      # app + API, with hot reload
+```
+
+Then open **<http://localhost:8000>**. That is the whole setup — no database to
+provision, no API key required, no seed script to run.
+
+| URL | What it is |
+|---|---|
+| <http://localhost:8000> | The app |
+| <http://localhost:8001> | The API |
+| <http://localhost:8001/docs> | Swagger, generated from the endpoint signatures |
+| <http://localhost:8001/graph> | Live visualiser for the provider/corridor graph |
+
+The dev server proxies API routes, so `/function/...` and `/walker/...` answer on
+port 8000 as well — either port works from curl.
+
+**The first comparison is slower than the rest.** The graph seeds itself from
+`data/*.csv` on the first query — 8 providers, 45 corridors, 984 `Serves` edges —
+and is reused from then on. Seeding is under a second; the wait on a cold start is
+Vite building the client.
+
+`--dev` gives hot reload for client files. Editing a **server** file (`.sv.jac`,
+`main.jac`, `market_data.py`) needs a restart to take effect.
+
+### The other commands
+
+```bash
+jac check .                   # type-check every file (20 files)
+jac test pricing_tests.jac    # the pricing tests (8 of them)
+jac clean                     # drop build artifacts under .jac/
+jac guide jac-core-cheatsheet # bundled Jac language reference
+```
+
+### After editing the pricing data
+
+The graph is built once and cached, so a change to `data/*.csv` is not picked up
+until you rebuild it. No restart needed:
+
+```bash
+curl -X POST localhost:8001/function/refresh_data \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+### If it stops working
+
+**"No provider matches those payment and payout choices" on every corridor.**
+The cached graph is stale — most likely a `.sv.jac` node archetype gained or lost
+a field while a graph built against the old shape was still on disk. Rebuild it
+from scratch:
+
+```bash
+pkill -f "jac start"          # stop the server first
+rm -f .jac/data/*             # the whole directory, not just anchor_store.db
+jac start --dev main.jac
+```
+
+Delete *everything* in `.jac/data/`. Removing `anchor_store.db` while leaving
+`users.db` behind produces `'JacScaleUserManager' object has no attribute '_lock'`.
+Nothing is lost either way: the graph is derived entirely from the CSVs.
+
+**The app is served on port 8002, or you are looking at stale results.** An
+earlier `jac start` is still holding 8000, and the new one has moved up. Check
+the banner it prints on boot, and clear the strays:
+
+```bash
+lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(8000|8001|8002)'
+pkill -9 -f "jac start"; pkill -9 -f vite
 ```
 
 ### The AI advisor (optional)
@@ -136,7 +207,9 @@ jac install 'byllm[local]' && jac model pull gemma-4-e4b   # then: local:gemma-4
 
 Without any of these the advisor still answers — from the deterministic fallback.
 
-### API
+### Calling the API directly
+
+With the server running:
 
 ```bash
 # Function RPC — typed objects on the wire
@@ -152,7 +225,9 @@ curl -X POST localhost:8001/function/advise -H 'Content-Type: application/json' 
   -d '{"message":"I want to send $300 from the US to Mexico"}'
 ```
 
-Swagger is at `/docs`; the live graph visualiser at `/graph`.
+Every `def:pub` is published at `/function/<name>` and every `walker:pub` at
+`/walker/<name>`, so the Swagger page at `/docs` stays in step with the code
+without anything being written down twice.
 
 ---
 
